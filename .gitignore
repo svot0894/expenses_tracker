@@ -1,0 +1,13 @@
+.venv/
+.vscode/
+.ruff_cache/
+
+__pycache__/
+*.pyc
+
+*.duckdb*
+*.wal
+*.tmp/
+
+# ignore files
+data/incoming*

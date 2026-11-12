@@ -1,0 +1,49 @@
+# Configuration for bank file parsing and schema mapping
+
+# data folder where bank files are located
+data_folder: "data/incoming"
+
+banks:
+  ubs:
+    name: UBS
+    # ---- Loader: which files belong to this bank --------------------------
+    files:
+      pattern: "ubs_{period_start}_{period_end}.csv"
+      period_date_format: "%Y%m%d"
+    # ---- Loader: how to read the file(s) ---------------------------------
+    read_options:
+      delimiter: ";"
+      quotechar: "\""
+      encoding: "UTF-8"
+      skiplines: 0
+    # ---- Validation: source contract / drift baseline ---------------------
+    base_schema: "Trade date;Trade time;Booking date;Value date;Currency;Debit;Credit;Individual amount;Balance;Transaction no.;Description1;Description2;Description3;Footnotes"
+    columns:
+      - name: "Trade date"
+        required: True
+      - name: "Trade time"
+        required: False
+      - name: "Booking date"
+        required: False
+      - name: "Value date"
+        required: False
+      - name: "Currency"
+        required: True
+      - name: "Debit"
+        required: True
+      - name: "Credit"
+        required: True
+      - name: "Individual amount"
+        required: False
+      - name: "Balance"
+        required: False
+      - name: "Transaction no."
+        required: True
+      - name: "Description1"
+        required: True
+      - name: "Description2"
+        required: False
+      - name: "Description3"
+        required: False
+      - name: "Footnotes"
+        required: False
