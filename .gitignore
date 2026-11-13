@@ -10,4 +10,6 @@ __pycache__/
 *.tmp/
 
 # ignore files
-data/incoming*
+data/*
+
+todo.md

@@ -7,6 +7,13 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "expenses_tracker"
+
 [dependency-groups]
 dev = [
     "ruff>=0.17.4",

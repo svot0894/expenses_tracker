@@ -1,7 +1,7 @@
 # Configuration for bank file parsing and schema mapping
 
 # data folder where bank files are located
-data_folder: "data/incoming"
+data_folder: "data"
 
 banks:
   ubs:
