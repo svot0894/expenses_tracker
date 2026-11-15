@@ -1,4 +1,3 @@
-```markdown
 # Expenses Tracker
 
 Expenses Tracker is a personal project for tracking spending. It allows me to review where my money goes and where I can improve my spending.
