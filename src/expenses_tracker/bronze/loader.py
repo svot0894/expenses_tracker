@@ -32,6 +32,8 @@ def discover_files(
 ):
     """Yield (bank_name, file_path) pairs."""
     for bank, config in banks.items():
+        config = config["bronze"]
+        
         pattern = config["files"]["pattern"].format(
             period_start="*",
             period_end="*",
@@ -429,7 +431,7 @@ def main() -> None:
                 conn=conn,
                 bank=bank,
                 file_path=file_path,
-                bank_config=config["banks"][bank],
+                bank_config=config["banks"][bank]["bronze"],
                 processed_folder=processed_folder / bank,
             )
 

@@ -6,45 +6,93 @@ data_folder: "data"
 banks:
   ubs:
     name: UBS
-    # File discovery: how to find the file(s) to load
-    files:
-      pattern: "ubs_{period_start}_{period_end}.csv"
-      period_date_format: "%Y%m%d"
-    
-    # CSV parsing options: how to read the file(s)
-    read_options:
-      delimiter: ";"
-      quotechar: "\""
-      encoding: "UTF-8"
-      skiplines: 0
-    
-    # Source schema: the expected columns in the CSV file
-    columns:
-      - name: "Trade date"
-        required: True
-      - name: "Trade time"
-        required: False
-      - name: "Booking date"
-        required: False
-      - name: "Value date"
-        required: False
-      - name: "Currency"
-        required: True
-      - name: "Debit"
-        required: True
-      - name: "Credit"
-        required: True
-      - name: "Individual amount"
-        required: False
-      - name: "Balance"
-        required: False
-      - name: "Transaction no."
-        required: True
-      - name: "Description1"
-        required: True
-      - name: "Description2"
-        required: False
-      - name: "Description3"
-        required: False
-      - name: "Footnotes"
-        required: False
+    bronze:
+      # File discovery: how to find the file(s) to load
+      files:
+        pattern: "ubs_{period_start}_{period_end}.csv"
+        period_date_format: "%Y%m%d"
+      
+      # CSV parsing options: how to read the file(s)
+      read_options:
+        delimiter: ";"
+        quotechar: "\""
+        encoding: "UTF-8"
+        skiplines: 0
+      
+      # Source schema: the expected columns in the CSV file
+      columns:
+        - name: "Trade date"
+          required: True
+        - name: "Trade time"
+          required: False
+        - name: "Booking date"
+          required: False
+        - name: "Value date"
+          required: False
+        - name: "Currency"
+          required: True
+        - name: "Debit"
+          required: True
+        - name: "Credit"
+          required: True
+        - name: "Individual amount"
+          required: False
+        - name: "Balance"
+          required: False
+        - name: "Transaction no."
+          required: True
+        - name: "Description1"
+          required: True
+        - name: "Description2"
+          required: False
+        - name: "Description3"
+          required: False
+        - name: "Footnotes"
+          required: False
+    silver:
+      # Renamed columns to match the expected schema
+      mappings:
+        transaction_id: "Transaction no."
+        transaction_date: "Trade date"
+        # amount for UBS is derived
+        currency: "Currency"
+        description: "Description1"
+      
+      # Transformation rules for UBS bank data
+      transformations:
+        - column: transaction_id
+          operation: trim_text
+        
+        - column: transaction_date
+          operation: parse_date
+          date_format: "%d.%m.%Y"
+        
+        - column: amount
+          operation: signed_amount
+          debit_column: "Debit"
+          credit_column: "Credit"
+        
+        - column: amount
+          operation: parse_decimal
+          precision: 18
+          scale: 2
+        
+        - column: currency
+          operation: trim_text
+        
+        - column: description
+          operation: trim_text
+      
+      # Validation rules for UBS bank data
+      validations:
+        - column: transaction_id
+          operation: not_null
+
+        - column: transaction_date
+          operation: not_null
+
+        - column: amount
+          operation: not_null
+          
+        - column: currency
+          operation: not_null
