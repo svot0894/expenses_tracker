@@ -186,6 +186,10 @@ def validate_schema(
 # --------------------------------------------------
 # Bronze ingestion
 # --------------------------------------------------
+def quote_identifier(value: str) -> str:
+    """Safely quote an identifier for use in SQL statements."""
+    return '"' + value.replace('"', '""') + '"'
+
 
 def write_bronze(
     conn: duckdb.DuckDBPyConnection,
@@ -201,22 +205,23 @@ def write_bronze(
     table_name = f"{bank}_raw"
 
     column_definitions = ", ".join(
-        f"{column} VARCHAR"
+        f"{quote_identifier(column)} VARCHAR"
         for column in expected_columns
     )
 
     target_columns = ", ".join(
-        column for column in expected_columns
+        f"{quote_identifier(column)}"
+        for column in expected_columns
     )
 
     projections: list[str] = []
 
     for column in expected_columns:
         if column in actual_columns:
-            projections.append(column)
+            projections.append(quote_identifier(column))
         else:
             projections.append(
-                f"NULL::VARCHAR AS {column}"
+                f"NULL::VARCHAR AS {quote_identifier(column)}"
             )
 
     select_columns = ", ".join(projections)
@@ -237,7 +242,7 @@ def write_bronze(
         row_count = conn.execute(
             f"""
             SELECT COUNT(*)
-            FROM {view_name}
+            FROM {quote_identifier(view_name)}
             """
         ).fetchone()
 
@@ -245,7 +250,7 @@ def write_bronze(
             f"""
             INSERT INTO {table_name} ({target_columns})
             SELECT {select_columns}
-            FROM {view_name}
+            FROM {quote_identifier(view_name)}
             """
         )
 
