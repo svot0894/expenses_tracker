@@ -3,11 +3,10 @@ import logging
 import shutil
 from pathlib import Path
 from typing import Dict, Any
+from hashlib import sha256
 
 import duckdb
 import yaml
-
-from expenses_tracker.common.calculations import calculate_checksum
 
 
 CONFIG_PATH = Path("config/banks.yml")
@@ -289,6 +288,13 @@ def archive_file(
 # --------------------------------------------------
 # Process a single file
 # --------------------------------------------------
+def calculate_checksum(file_path: str) -> str:
+    h = sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 def process_file(
     conn: duckdb.DuckDBPyConnection,
