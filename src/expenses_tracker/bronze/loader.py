@@ -1,117 +1,428 @@
-import glob
-import os
-import shutil
 
-import duckdb as dd
+import logging
+import shutil
+from pathlib import Path
+from typing import Dict, Any
+
+import duckdb
 import yaml
 
 from expenses_tracker.common.calculations import calculate_checksum
 
-with open("config/banks.yml", "r") as f:
-    banks_config = yaml.safe_load(f)
 
-INCOMING_FOLDER = f'{banks_config["data_folder"]}/incoming'
-PROCESSED_FOLDER = f'{banks_config["data_folder"]}/processed'
+CONFIG_PATH = Path("config/banks.yml")
+DATABASE_PATH = Path("data/expenses.duckdb")
 
-
-# connect to duckdb (use context manager)
-conn = dd.connect(database="data/expenses.duckdb")
-
-# make sure the _ingested_files table exists
-conn.execute("""
-CREATE SEQUENCE IF NOT EXISTS _ingested_files_file_id_seq;
-CREATE TABLE IF NOT EXISTS _ingested_files (
-    file_id INTEGER PRIMARY KEY DEFAULT nextval('_ingested_files_file_id_seq'),
-    file_path TEXT NOT NULL,
-    checksum TEXT,
-    row_count INT DEFAULT 0,
-    status TEXT check (status IN ('running', 'success', 'failed')),
-    ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
+logger = logging.getLogger(__name__)
 
 
-# find files matching the pattern defined in the banks.yml configuration
-files = []
-for bank, config in banks_config["banks"].items():
-    pattern = config["files"]["pattern"]
-    final_pattern = f"{INCOMING_FOLDER}/{bank}/{pattern.format(period_start='*', period_end='*')}"  # TBD
-    bank_files = glob.glob(final_pattern)
-    files.append((bank, bank_files))
+# --------------------------------------------------
+# Configuration and discovery
+# --------------------------------------------------
+
+def load_config(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        config: Dict[str, Any] = yaml.safe_load(file)
+
+    return config
 
 
-if not any(bank_files for _, bank_files in files):
-    print("No files found.")
-    exit()
+def discover_files(
+    incoming_folder: Path,
+    banks: Dict[str, Any],
+):
+    """Yield (bank_name, file_path) pairs."""
+    for bank, config in banks.items():
+        pattern = config["files"]["pattern"].format(
+            period_start="*",
+            period_end="*",
+        )
+
+        bank_folder = incoming_folder / bank
+
+        for file_path in sorted(bank_folder.glob(pattern)):
+            if file_path.is_file():
+                yield bank, file_path
 
 
-# check _ingested_files to decide whether the file is already ingested
-for bank, bank_files in files:
-    print(f"Processing files for bank: {bank}...")
-    for file in bank_files:
-        print(f"Processing file: {file}...")
-        try:
-            ingested = conn.execute("SELECT file_id, status FROM _ingested_files WHERE file_path = ? ORDER BY ingested_at DESC LIMIT 1", (file,)).fetchone()
-            if ingested and ingested[1] == 'success':
-                print(f"File already ingested: {file}")
-                continue
-            elif ingested and ingested[1] == 'failed':
-                conn.execute("UPDATE _ingested_files SET checksum = ?, status = ? WHERE file_id = ?", (calculate_checksum(file), 'running', ingested[0]))
-            else:
-                conn.execute("INSERT INTO _ingested_files (file_path, checksum, status) VALUES (?, ?, ?)", (file, calculate_checksum(file), 'running'))
-        except Exception as e:
-            raise RuntimeError(f"Failed to check or mark file: {file}. Error: {e}")
+# --------------------------------------------------
+# Database and ingestion history
+# --------------------------------------------------
+
+def initialize_database(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS
+            _ingested_files_file_id_seq
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _ingested_files (
+            file_id INTEGER PRIMARY KEY
+                DEFAULT nextval('_ingested_files_file_id_seq'),
+            file_path TEXT NOT NULL,
+            checksum TEXT NOT NULL,
+            row_count INTEGER DEFAULT 0,
+            status TEXT NOT NULL
+                CHECK (status IN ('running', 'success', 'failed')),
+            ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
 
-        try:
-            bank_config = banks_config["banks"][bank]
-            read_options = bank_config["read_options"]
-            bank_data = conn.read_csv(
-                file,
-                delimiter=read_options["delimiter"],
-                quotechar=read_options["quotechar"],
-                encoding=read_options["encoding"],
-                skiprows=read_options["skiplines"],
-                all_varchar=True,
-                header=True
+def get_latest_ingestion(conn: duckdb.DuckDBPyConnection, file_path: Path):
+    return conn.execute(
+        """
+        SELECT file_id, checksum, status
+        FROM _ingested_files
+        WHERE file_path = ?
+        ORDER BY file_id DESC
+        LIMIT 1
+        """,
+        [str(file_path)],
+    ).fetchone()
+
+
+def start_ingestion(
+    conn: duckdb.DuckDBPyConnection,
+    file_path: Path,
+    checksum: str,
+) -> int:
+    """Create a new ingestion attempt."""
+    result = conn.execute(
+        """
+        INSERT INTO _ingested_files (
+            file_path, checksum, status
+        )
+        VALUES (?, ?, 'running')
+        RETURNING file_id
+        """,
+        [str(file_path), checksum],
+    ).fetchone()
+
+    return result[0] if result else 0
+
+
+def update_ingestion(
+    conn: duckdb.DuckDBPyConnection ,
+    file_id: int,
+    status: str,
+    row_count: int = 0,
+) -> None:
+    conn.execute(
+        """
+        UPDATE _ingested_files
+        SET status = ?, row_count = ?
+        WHERE file_id = ?
+        """,
+        [status, row_count, file_id],
+    )
+
+
+# --------------------------------------------------
+# CSV reading and schema validation
+# --------------------------------------------------
+
+def read_bank_file(conn: duckdb.DuckDBPyConnection, file_path: Path, bank_config: Dict[str, Any]):
+    options = bank_config["read_options"]
+
+    return conn.read_csv(
+        str(file_path),
+        delimiter=options["delimiter"],
+        quotechar=options["quotechar"],
+        encoding=options["encoding"],
+        skiprows=options["skiplines"],
+        all_varchar=True,
+        header=True,
+    )
+
+
+def get_base_schema(bank_config: Dict[str, Any]) -> list[str]:
+    return [
+        column.strip()
+        for column in bank_config["base_schema"].split(";")
+        if column.strip()
+    ]
+
+
+def validate_schema(
+    actual_columns: list[str],
+    bank_config: Dict[str, Any],
+) -> None:
+    expected_columns = get_base_schema(bank_config)
+
+    column_config = {
+        column["name"]: column
+        for column in bank_config["columns"]
+    }
+
+    extra_columns = set(actual_columns) - set(expected_columns)
+    missing_columns = set(expected_columns) - set(actual_columns)
+
+    if extra_columns:
+        logger.warning(
+            "Extra columns detected: %s",
+            sorted(extra_columns),
+        )
+
+    for column in expected_columns:
+        if column not in missing_columns:
+            continue
+
+        required = column_config.get(column, {}).get(
+            "required", True
+        )
+
+        if required:
+            raise ValueError(
+                f"Missing required column: {column}"
             )
-        except Exception as e:
-            conn.execute("UPDATE _ingested_files SET status = ? WHERE file_path = ?", ('failed', file))
-            raise RuntimeError(f"Failed to read file: {file}. Error: {e}")
 
-        # VALIDATION: schema drift
-            # extra column: warn
-            # missing optional column: warn
-            # missing required column: fail
-        
-        current_header = bank_data.columns
-        base_schema = bank_config["base_schema"].split(";")
+        logger.warning(
+            "Missing optional column: %s",
+            column,
+        )
 
-        extra_columns = [col for col in current_header if col not in base_schema]
-        missing_columns = [col for col in base_schema if col not in current_header]
 
-        if extra_columns:
-            print(f"Warning: Extra columns detected in {file}: {extra_columns}")
-        for col in missing_columns:
-            col_conf = next((col_conf for col_conf in bank_config["columns"] if col_conf["name"] == col), {})
-            if col_conf.get("required", True):
-                raise ValueError(f"Missing required column {col} in {file}")
-            else:
-                print(f"Warning: Missing optional column {col} in {file}")
+# --------------------------------------------------
+# Bronze ingestion
+# --------------------------------------------------
 
-        # write rows to bronze table and record ingested rows
-        conn.execute(f"CREATE TABLE IF NOT EXISTS {bank}_raw AS SELECT * FROM bank_data WHERE 1=0")
-        conn.execute(f"INSERT INTO {bank}_raw SELECT * FROM bank_data")
+def write_bronze(
+    conn: duckdb.DuckDBPyConnection,
+    bank: str,
+    bank_data: duckdb.DuckDBPyRelation,
+    bank_config: Dict[str, Any],
+) -> int:
+    """Write columns by name in the expected schema order."""
 
-        # row count
-        row_count = bank_data.shape[0]
+    expected_columns = get_base_schema(bank_config)
+    actual_columns = set(bank_data.columns)
 
-        # log the ingestion result (success or failure)
-        conn.execute("UPDATE _ingested_files SET row_count = ?, status = ? WHERE file_path = ?", (row_count, 'success', file))
-        print(f"Successfully ingested file: {file}")
+    table_name = f"{bank}_raw"
 
-        # move file to processed folder
-        processed_folder = f"{PROCESSED_FOLDER}/{bank}"
-        os.makedirs(processed_folder, exist_ok=True)
-        shutil.move(file, processed_folder)
-conn.close()
+    column_definitions = ", ".join(
+        f"{column} VARCHAR"
+        for column in expected_columns
+    )
+
+    target_columns = ", ".join(
+        column for column in expected_columns
+    )
+
+    projections: list[str] = []
+
+    for column in expected_columns:
+        if column in actual_columns:
+            projections.append(column)
+        else:
+            projections.append(
+                f"NULL::VARCHAR AS {column}"
+            )
+
+    select_columns = ", ".join(projections)
+
+    # The relation is only available during this function.
+    view_name = "_current_ingestion_batch"
+    bank_data.create_view(view_name, replace=True)
+
+    try:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                {column_definitions}
+            )
+            """
+        )
+
+        row_count = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {view_name}
+            """
+        ).fetchone()
+
+        conn.execute(
+            f"""
+            INSERT INTO {table_name} ({target_columns})
+            SELECT {select_columns}
+            FROM {view_name}
+            """
+        )
+
+        return row_count[0] if row_count else 0
+
+    finally:
+        conn.execute(
+            f"DROP VIEW IF EXISTS {view_name}"
+        )
+
+
+# --------------------------------------------------
+# File archival
+# --------------------------------------------------
+
+def archive_file(
+    file_path: Path,
+    processed_folder: Path,
+) -> None:
+    processed_folder.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    destination = processed_folder / file_path.name
+
+    if destination.exists():
+        raise FileExistsError(
+            f"Archive destination already exists: {destination}"
+        )
+
+    shutil.move(str(file_path), str(destination))
+
+    logger.info("Archived file: %s", destination)
+
+
+# --------------------------------------------------
+# Process a single file
+# --------------------------------------------------
+
+def process_file(
+    conn: duckdb.DuckDBPyConnection,
+    bank: str,
+    file_path: Path,
+    bank_config: Dict[str, Any],
+    processed_folder: Path,
+) -> None:
+    logger.info("Processing file: %s", file_path)
+
+    checksum = calculate_checksum(str(file_path))
+
+    previous = get_latest_ingestion(conn, file_path)
+
+    if previous:
+        _, previous_checksum, previous_status = previous
+
+        if previous_status == "success":
+            if previous_checksum != checksum:
+                raise ValueError(
+                    f"Previously ingested file has changed: {file_path}"
+                )
+
+            logger.info("Already ingested: %s", file_path)
+            archive_file(file_path, processed_folder)
+            return
+
+        if previous_status == "running":
+            raise RuntimeError(
+                f"Unresolved ingestion attempt for {file_path}. "
+                "Verify its outcome before retrying."
+            )
+
+    file_id = start_ingestion(conn, file_path, checksum)
+
+    try:
+        bank_data = read_bank_file(
+            conn,
+            file_path,
+            bank_config,
+        )
+
+        validate_schema(
+            bank_data.columns,
+            bank_config,
+        )
+
+        # Rows and the success status commit together.
+        conn.execute("BEGIN TRANSACTION")
+
+        try:
+            row_count = write_bronze(
+                conn,
+                bank,
+                bank_data,
+                bank_config,
+            )
+
+            update_ingestion(
+                conn,
+                file_id,
+                status="success",
+                row_count=row_count,
+            )
+
+            conn.execute("COMMIT")
+
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    except Exception:
+        update_ingestion(
+            conn,
+            file_id,
+            status="failed",
+        )
+
+        logger.exception(
+            "Ingestion failed: %s",
+            file_path,
+        )
+        raise
+
+    logger.info(
+        "Successfully ingested %s (%d rows)",
+        file_path,
+        row_count,
+    )
+
+    # Archival happens after the database commit.
+    archive_file(file_path, processed_folder)
+
+
+# --------------------------------------------------
+# Main orchestration
+# --------------------------------------------------
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+
+    config = load_config(CONFIG_PATH)
+
+    data_folder = Path(config["data_folder"])
+    incoming_folder = data_folder / "incoming"
+    processed_folder = data_folder / "processed"
+
+    files = list(
+        discover_files(
+            incoming_folder,
+            config["banks"],
+        )
+    )
+
+    if not files:
+        logger.info("No files found.")
+        return
+
+    DATABASE_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with duckdb.connect(str(DATABASE_PATH)) as conn:
+        initialize_database(conn)
+
+        for bank, file_path in files:
+            process_file(
+                conn=conn,
+                bank=bank,
+                file_path=file_path,
+                bank_config=config["banks"][bank],
+                processed_folder=processed_folder / bank,
+            )
+
+
+if __name__ == "__main__":
+    main()
