@@ -6,18 +6,19 @@ data_folder: "data"
 banks:
   ubs:
     name: UBS
-    # ---- Loader: which files belong to this bank --------------------------
+    # File discovery: how to find the file(s) to load
     files:
       pattern: "ubs_{period_start}_{period_end}.csv"
       period_date_format: "%Y%m%d"
-    # ---- Loader: how to read the file(s) ---------------------------------
+    
+    # CSV parsing options: how to read the file(s)
     read_options:
       delimiter: ";"
       quotechar: "\""
       encoding: "UTF-8"
       skiplines: 0
-    # ---- Validation: source contract / drift baseline ---------------------
-    base_schema: "Trade date;Trade time;Booking date;Value date;Currency;Debit;Credit;Individual amount;Balance;Transaction no.;Description1;Description2;Description3;Footnotes"
+    
+    # Source schema: the expected columns in the CSV file
     columns:
       - name: "Trade date"
         required: True

@@ -138,9 +138,8 @@ def read_bank_file(conn: duckdb.DuckDBPyConnection, file_path: Path, bank_config
 
 def get_base_schema(bank_config: Dict[str, Any]) -> list[str]:
     return [
-        column.strip()
-        for column in bank_config["base_schema"].split(";")
-        if column.strip()
+        column["name"]
+        for column in bank_config["columns"]
     ]
 
 
