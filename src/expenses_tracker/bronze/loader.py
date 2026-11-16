@@ -196,6 +196,7 @@ def write_bronze(
     bank: str,
     bank_data: duckdb.DuckDBPyRelation,
     bank_config: Dict[str, Any],
+    file_id: int
 ) -> int:
     """Write columns by name in the expected schema order."""
 
@@ -209,9 +210,18 @@ def write_bronze(
         for column in expected_columns
     )
 
+    column_definitions += """
+        , "_source_file_id" INTEGER NOT NULL
+        , "_source_row_number" BIGINT NOT NULL
+    """
+
     target_columns = ", ".join(
         f"{quote_identifier(column)}"
         for column in expected_columns
+    )
+
+    target_columns += (
+        ', "_source_file_id", "_source_row_number"'
     )
 
     projections: list[str] = []
@@ -249,9 +259,12 @@ def write_bronze(
         conn.execute(
             f"""
             INSERT INTO {table_name} ({target_columns})
-            SELECT {select_columns}
+            SELECT {select_columns},
+            ? AS "_source_file_id",
+            ROW_NUMBER() OVER() AS "_source_row_number"
             FROM {quote_identifier(view_name)}
-            """
+            """,
+            [file_id]
         )
 
         return row_count[0] if row_count else 0
@@ -353,6 +366,7 @@ def process_file(
                 bank,
                 bank_data,
                 bank_config,
+                file_id
             )
 
             update_ingestion(

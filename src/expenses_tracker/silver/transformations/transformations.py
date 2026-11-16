@@ -30,9 +30,10 @@ def parse_decimal(
     )
 
 def signed_amount(debit_column: str, credit_column: str) -> str:
+    """For cases where values are split between Debit and Credit it joins them as a single column."""
     debit_value = parse_decimal(debit_column)
     credit_value = parse_decimal(credit_column)
-    return f"COALESCE({debit_value}, 0) - COALESCE({credit_value}, 0)"
+    return f"COALESCE({debit_value}, {credit_value})"
 
 
 TRANSFORMATIONS: dict[str, Callable[..., str]] = {

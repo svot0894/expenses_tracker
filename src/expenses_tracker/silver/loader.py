@@ -25,6 +25,18 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 # step 1: initialize silver tables ({bank_name}_ready and quarantine_records)
 def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
+    
+    # Create ingestion log table
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS _silver_processed (
+            source_file_id INTEGER PRIMARY KEY,
+            bank_name VARCHAR NOT NULL,
+            row_count_valid BIGINT NOT NULL,
+            row_count_invalid BIGINT NOT NULL,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    
     # Create silver tables for the given bank
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {bank_name}_ready (
@@ -51,10 +63,35 @@ def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
         );
     """)
 
+# Step 1.5: determine which files are pending ingestion
+def get_pending_files(conn: duckdb.DuckDBPyConnection, bank_name: str):
+    """Gets pending files by comparing _ingested_files against _silver_processed."""
+
+    results = conn.execute(f"""
+    SELECT DISTINCT if.file_id
+    FROM _ingested_files as if
+    LEFT JOIN _silver_processed as sp
+        ON if.file_id = sp.source_file_id
+    WHERE
+        sp.source_file_id is NULL
+        AND if.status = 'success'
+        AND if.file_path LIKE '%{bank_name}%'
+        ;
+    """).fetchall()
+
+    return [row[0] for row in results]
+
 # step 2: read data from source bronze table ({bank_name}_raw)
-def read_bronze_data(conn: duckdb.DuckDBPyConnection, bank_name: str) -> duckdb.DuckDBPyRelation:
+def read_bronze_data(conn: duckdb.DuckDBPyConnection, bank_name: str, file_id: int) -> duckdb.DuckDBPyRelation:
     """Reads data from bronze table ({bank_name}_raw)."""
-    return conn.sql(f"SELECT * FROM {bank_name}_raw")
+    return conn.sql(
+        f"""
+        SELECT *
+        FROM {bank_name}_raw
+        WHERE "_source_file_id" = ?
+        """,
+        params=[file_id],
+    )
 
 # step 3: apply transformations
 def transform_data(bronze_data: duckdb.DuckDBPyRelation, config: Dict[str, Any]):
@@ -249,18 +286,75 @@ def write_invalid_data(invalid_data: duckdb.DuckDBPyRelation, bank_name: str, co
         conn.execute("DROP VIEW IF EXISTS tmp_invalid_data")
 
 # step 7: orchestrate the entire process for a given bank
-def process_bank_data(bank_name: str, config: Dict[str, Any]):
+def process_bank_data(
+    conn: duckdb.DuckDBPyConnection,
+    bank_name: str,
+    bank_config: dict[str, Any],
+) -> None:
 
-    with duckdb.connect(DATABASE_PATH) as conn:
-        initialize_silver_tables(conn, bank_name)
-        bronze_data = read_bronze_data(conn, bank_name)
-    
-        bronze_data_transformed = transform_data(bronze_data, config)
+    initialize_silver_tables(conn, bank_name)
 
-        valid_data, invalid_data = validate_data(bronze_data_transformed, config)
+    pending_files = get_pending_files(conn, bank_name)
 
-        write_valid_data(valid_data, bank_name, conn)
-        write_invalid_data(invalid_data, bank_name, conn)
+    for file_id in pending_files:
+        logger.info(
+            "Processing Silver batch %s for %s",
+            file_id,
+            bank_name,
+        )
+
+        conn.execute("BEGIN TRANSACTION")
+
+        try:
+            bronze_data = read_bronze_data(
+                conn,
+                bank_name,
+                file_id,
+            )
+
+            transformed_data = transform_data(
+                bronze_data,
+                bank_config["silver"],
+            )
+
+            valid_data, invalid_data = validate_data(
+                transformed_data,
+                bank_config,
+            )
+
+            valid_count: int = len(valid_data)
+            invalid_count: int = len(invalid_data)
+
+            write_valid_data(valid_data, bank_name, conn)
+            write_invalid_data(invalid_data, bank_name, conn)
+
+            conn.execute(
+                """
+                INSERT INTO _silver_processed (
+                    source_file_id,
+                    bank_name,
+                    row_count_valid,
+                    row_count_invalid
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    file_id,
+                    bank_name,
+                    valid_count,
+                    invalid_count,
+                ],
+            )
+
+            conn.execute("COMMIT")
+
+        except Exception:
+            conn.execute("ROLLBACK")
+            logger.exception(
+                "Silver processing failed for batch %s",
+                file_id,
+            )
+            raise
 
 # MAIN
 def main():
@@ -271,9 +365,12 @@ def main():
     
     config = load_config(CONFIG_PATH)
 
+    # initialize database connection
+    conn = duckdb.connect(DATABASE_PATH)
+
     for bank, config in config["banks"].items():
         logger.info(f"Processing data for bank: {bank}")
-        process_bank_data(bank, config["silver"])
+        process_bank_data(conn, bank, config)
         logger.info(f"Finished processing data for bank: {bank}")
 
 if __name__ == "__main__":
