@@ -314,7 +314,7 @@ def process_bank_data(
 
             transformed_data = transform_data(
                 bronze_data,
-                bank_config["silver"],
+                bank_config,
             )
 
             valid_data, invalid_data = validate_data(
@@ -370,7 +370,7 @@ def main():
 
     for bank, config in config["banks"].items():
         logger.info(f"Processing data for bank: {bank}")
-        process_bank_data(conn, bank, config)
+        process_bank_data(conn, bank, config["silver"])
         logger.info(f"Finished processing data for bank: {bank}")
 
 if __name__ == "__main__":

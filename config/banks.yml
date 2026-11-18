@@ -96,3 +96,87 @@ banks:
           
         - column: currency
           operation: not_null
+  bcf:
+    name: BCF
+    bronze:
+      # File discovery: how to find the file(s) to load
+      files:
+        pattern: "bcf_{period_start}_{period_end}.csv"
+        period_date_format: "%Y%m%d"
+      
+      # CSV parsing options: how to read the file(s)
+      read_options:
+        delimiter: ","
+        quotechar: "\""
+        encoding: "UTF-8"
+        skiplines: 0
+      
+      # Source schema: the expected columns in the CSV file
+      columns:
+        - name: "Date"
+          required: True
+        - name: "Bénéficiaire"
+          required: True
+        - name: "Montant"
+          required: True
+        - name: "Devise"
+          required: True
+        - name: "Compte"
+          required: True
+        - name: "Catégorie"
+          required: False
+        - name: "Titulaire du compte"
+          required: False
+        - name: "Référence" # appears twice
+          required: False
+        - name: "Informations de paiement"
+          required: False
+        - name: "Commentaire"
+          required: False
+        - name: "Mots clés"
+          required: False
+    silver:
+      # Renamed columns to match the expected schema
+      mappings:
+        # transaction_id is derived
+        transaction_date: "Date"
+        amount: "Montant"
+        currency: "Devise"
+        description: "Bénéficiaire"
+      
+      # Transformation rules for BCF bank data
+      transformations:
+        - column: transaction_id
+          operation: generate_id
+
+        - column: transaction_date
+          operation: parse_date
+          date_format: "%m/%d/%Y"
+
+        - column: amount
+          operation: normalize_numbers
+        
+        - column: amount
+          operation: parse_decimal
+          precision: 18
+          scale: 2
+        
+        - column: currency
+          operation: trim_text
+        
+        - column: description
+          operation: trim_text
+      
+      # Validation rules for BCF bank data
+      validations:
+        - column: transaction_id
+          operation: not_null
+
+        - column: transaction_date
+          operation: not_null
+
+        - column: amount
+          operation: not_null
+          
+        - column: currency
+          operation: not_null
