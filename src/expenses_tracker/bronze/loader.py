@@ -1,13 +1,12 @@
 
 import logging
 import shutil
-from pathlib import Path
-from typing import Dict, Any
 from hashlib import sha256
+from pathlib import Path
+from typing import Any
 
 import duckdb
 import yaml
-
 
 CONFIG_PATH = Path("config/banks.yml")
 DATABASE_PATH = Path("data/expenses.duckdb")
@@ -19,16 +18,16 @@ logger = logging.getLogger(__name__)
 # Configuration and discovery
 # --------------------------------------------------
 
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
-        config: Dict[str, Any] = yaml.safe_load(file)
+        config: dict[str, Any] = yaml.safe_load(file)
 
     return config
 
 
 def discover_files(
     incoming_folder: Path,
-    banks: Dict[str, Any],
+    banks: dict[str, Any],
 ):
     """Yield (bank_name, file_path) pairs."""
     for bank, config in banks.items():
@@ -123,7 +122,7 @@ def update_ingestion(
 # CSV reading and schema validation
 # --------------------------------------------------
 
-def read_bank_file(conn: duckdb.DuckDBPyConnection, file_path: Path, bank_config: Dict[str, Any]):
+def read_bank_file(conn: duckdb.DuckDBPyConnection, file_path: Path, bank_config: dict[str, Any]):
     options = bank_config["read_options"]
 
     return conn.read_csv(
@@ -137,7 +136,7 @@ def read_bank_file(conn: duckdb.DuckDBPyConnection, file_path: Path, bank_config
     )
 
 
-def get_base_schema(bank_config: Dict[str, Any]) -> list[str]:
+def get_base_schema(bank_config: dict[str, Any]) -> list[str]:
     return [
         column["name"]
         for column in bank_config["columns"]
@@ -146,7 +145,7 @@ def get_base_schema(bank_config: Dict[str, Any]) -> list[str]:
 
 def validate_schema(
     actual_columns: list[str],
-    bank_config: Dict[str, Any],
+    bank_config: dict[str, Any],
 ) -> None:
     expected_columns = get_base_schema(bank_config)
 
@@ -195,7 +194,7 @@ def write_bronze(
     conn: duckdb.DuckDBPyConnection,
     bank: str,
     bank_data: duckdb.DuckDBPyRelation,
-    bank_config: Dict[str, Any],
+    bank_config: dict[str, Any],
     file_id: int
 ) -> int:
     """Write columns by name in the expected schema order."""
@@ -315,7 +314,7 @@ def process_file(
     conn: duckdb.DuckDBPyConnection,
     bank: str,
     file_path: Path,
-    bank_config: Dict[str, Any],
+    bank_config: dict[str, Any],
     processed_folder: Path,
 ) -> None:
     logger.info("Processing file: %s", file_path)

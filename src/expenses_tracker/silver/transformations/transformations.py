@@ -1,5 +1,5 @@
-
 from collections.abc import Callable
+
 
 def quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
@@ -47,7 +47,7 @@ def signed_amount(debit_column: str, credit_column: str) -> str:
     credit_value = parse_decimal(credit_column)
     return f"COALESCE({debit_value}, {credit_value})"
 
-def generate_id(**kwargs) -> str:
+def generate_id(**column: str) -> str:
     return "UUID()"
 
 

@@ -1,14 +1,13 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 import duckdb
 import yaml
 
 from .transformations.transformations import TRANSFORMATIONS
 from .validations.validations import VALIDATIONS
-
 
 CONFIG_PATH = Path("config/banks.yml")
 DATABASE_PATH = Path("data/expenses.duckdb")
@@ -17,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 # step 0: load configuration for the given bank
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
-        config: Dict[str, Any] = yaml.safe_load(file)
+        config: dict[str, Any] = yaml.safe_load(file)
 
     return config
 
@@ -27,7 +26,7 @@ def load_config(path: Path) -> Dict[str, Any]:
 def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
     
     # Create ingestion log table
-    conn.execute(f"""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS _silver_processed (
             source_file_id INTEGER PRIMARY KEY,
             bank_name VARCHAR NOT NULL,
@@ -51,7 +50,7 @@ def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
     """)
 
     # Create quarantine table if not exists
-    conn.execute(f"""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS quarantine_records (
             quarantine_id UUID PRIMARY KEY DEFAULT uuid(),
             source_bank VARCHAR NOT NULL,
@@ -96,10 +95,10 @@ def read_bronze_data(conn: duckdb.DuckDBPyConnection, bank_name: str, file_id: i
     )
 
 # step 3: apply transformations
-def transform_data(bronze_data: duckdb.DuckDBPyRelation, config: Dict[str, Any]):
+def transform_data(bronze_data: duckdb.DuckDBPyRelation, config: dict[str, Any]):
     if "mappings" in config:
         # rename columns
-        rename_map: Dict[str, str] = {source: target for target, source in config["mappings"].items()}
+        rename_map: dict[str, str] = {source: target for target, source in config["mappings"].items()}
         bronze_data = bronze_data.rename(**rename_map)
 
     if "transformations" in config:
