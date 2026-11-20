@@ -19,4 +19,8 @@ python -m venv .venv
 uv pip install -e .
 ```
 
-_duckdb.BinderException: Binder Error: Copy is only supported for UTF-8 encoded files, ENCODING 'UTF-8'
+Accessing DB UI
+
+```bash
+duckdb -ui      
+```

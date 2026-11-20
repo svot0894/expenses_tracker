@@ -42,10 +42,11 @@ def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
         CREATE TABLE IF NOT EXISTS {bank_name}_ready (
             transaction_id STRING PRIMARY KEY,
             transaction_date DATE,
-            description TEXT,
+            description VARCHAR,
             amount DECIMAL(18, 2),
-            category TEXT,
-            currency TEXT
+            category VARCHAR,
+            account VARCHAR,
+            currency VARCHAR
         );
     """)
 
@@ -59,6 +60,7 @@ def initialize_silver_tables(conn: duckdb.DuckDBPyConnection, bank_name: str):
             source_row_id VARCHAR,
             record_data JSON NOT NULL,
             validation_errors JSON NOT NULL,
+            status VARCHAR NOT NULL DEFAULT 'review' CHECK (status in ('review', 'ready', 'ignore')),
             quarantined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
@@ -213,15 +215,14 @@ def write_valid_data(
         "transaction_date",
         "description",
         "amount",
+        "account",
         "currency",
     ]
 
     valid_data.create_view("tmp_valid_data", replace=True)
 
-
-    # prepare columns
     columns = ", ".join(
-        col for col in silver_columns
+        col for col in silver_columns if col in valid_data.columns
     )
 
     try:

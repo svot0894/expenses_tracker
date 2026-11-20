@@ -142,6 +142,7 @@ banks:
         transaction_date: "Date"
         amount: "Montant"
         currency: "Devise"
+        account: "Compte"
         description: "Bénéficiaire"
       
       # Transformation rules for BCF bank data
@@ -161,6 +162,9 @@ banks:
           precision: 18
           scale: 2
         
+        - column: account
+          operation: trim_text
+        
         - column: currency
           operation: trim_text
         
@@ -173,6 +177,9 @@ banks:
           operation: not_null
 
         - column: transaction_date
+          operation: not_null
+        
+        - column: account
           operation: not_null
 
         - column: amount
