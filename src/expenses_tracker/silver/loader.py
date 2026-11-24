@@ -120,13 +120,13 @@ def transform_data(bronze_data: duckdb.DuckDBPyRelation, config: dict[str, Any])
             }
 
             # Most transformations operate on their target column.
-            if operation != "signed_amount":
+            if operation != "combine_columns":
                 params["column"] = column
 
             expression = TRANSFORMATIONS[operation](**params)
 
             # Update an existing column or create a new one
-            if column in bronze_data.columns:
+            if column.lower() in {c.lower() for c in bronze_data.columns}:
                 bronze_data = bronze_data.project(
                     f"* REPLACE ({expression} AS {column})"
                 )

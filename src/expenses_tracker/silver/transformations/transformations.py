@@ -41,11 +41,17 @@ def parse_decimal(
         f"AS DECIMAL({precision}, {scale}))"
     )
 
-def signed_amount(debit_column: str, credit_column: str) -> str:
-    """For cases where values are split between Debit and Credit it joins them as a single column."""
-    debit_value = parse_decimal(debit_column)
-    credit_value = parse_decimal(credit_column)
-    return f"COALESCE({debit_value}, {credit_value})"
+
+def combine_columns(columns: list[str]) -> str:
+    """Coalesce and parse multiple source columns into one single column."""
+    if not columns:
+        raise ValueError("At least one column is required.")
+
+    expressions = ", ".join(quote_identifier(c) for c in columns)
+
+    return f"COALESCE({expressions})"
+
+
 
 def generate_id(**column: str) -> str:
     return "UUID()"
@@ -56,6 +62,6 @@ TRANSFORMATIONS: dict[str, Callable[..., str]] = {
     "parse_date": parse_date,
     "normalize_numbers": normalize_numbers,
     "parse_decimal": parse_decimal,
-    "signed_amount": signed_amount,
+    "combine_columns": combine_columns,
     "generate_id": generate_id,
 }

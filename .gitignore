@@ -12,4 +12,6 @@ __pycache__/
 # ignore files
 data/*
 
+# WIP files
 todo.md
+categories.py

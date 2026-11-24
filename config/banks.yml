@@ -68,9 +68,8 @@ banks:
           date_format: "%Y-%m-%d"
         
         - column: amount
-          operation: signed_amount
-          debit_column: "Debit"
-          credit_column: "Credit"
+          operation: combine_columns
+          columns: ["Debit", "Credit"]
         
         - column: amount
           operation: parse_decimal
@@ -180,6 +179,90 @@ banks:
           operation: not_null
         
         - column: account
+          operation: not_null
+
+        - column: amount
+          operation: not_null
+          
+        - column: currency
+          operation: not_null
+  swc:
+    name: SWISSCARD
+    bronze:
+      files:
+        pattern: "swc_{period_start}_{period_end}.csv"
+        period_date_format: "%Y%m%d"
+      read_options:
+        delimiter: ","
+        quotechar: "\""
+        encoding: "UTF-8"
+        skiplines: 0
+      columns:
+        - name: "Transaction date"
+          required: True
+        - name: "Description"
+          required: True
+        - name: "Merchant"
+          required: True
+        - name: "Card number"
+          required: False
+        - name: "Currency"
+          required: True
+        - name: "Amount"
+          required: True
+        - name: "Foreign Currency"
+          required: True
+        - name: "Amount in foreign currency"
+          required: True
+        - name: "Debit/Credit"
+          required: True
+        - name: "Status"
+          required: False
+        - name: "Merchant Category"
+          required: False
+        - name: "Registered Category"
+          required: False
+    silver:
+      # Renamed columns to match the expected schema
+      mappings:
+        # transaction_id is derived
+        transaction_date: "Transaction date"
+        # amount for SWC is derived
+        # currency for SWC is derived
+        description: "Description"
+      
+      transformations:
+        - column: transaction_id
+          operation: generate_id
+        
+        - column: transaction_date
+          operation: parse_date
+          date_format: "%d.%m.%Y"
+        
+        - column: amount
+          operation: combine_columns
+          columns: ["Amount", "Amount in foreign currency"]
+        
+        - column: amount
+          operation: parse_decimal
+          precision: 18
+          scale: 2
+        
+        - column: currency
+          operation: combine_columns
+          columns: ["Currency", "Foreign Currency"]
+        
+        - column: currency
+          operation: trim_text
+        
+        - column: description
+          operation: trim_text
+      
+      validations:
+        - column: transaction_id
+          operation: not_null
+
+        - column: transaction_date
           operation: not_null
 
         - column: amount
